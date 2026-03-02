@@ -1,0 +1,25 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xccheckout
+*.xcscmblueprint
+DerivedData/
+
+# OS
+.DS_Store
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# Dependency resolution
+Package.resolved
