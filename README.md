@@ -244,9 +244,45 @@ let kit = ReviewKit(store: AppGroupReviewStore())
 
 ---
 
+## Debug Tools
+
+### ReviewKitDebugView
+
+`ReviewKitDebugView` is a SwiftUI view (compiled only in `DEBUG` builds) that displays a live snapshot of ReviewKit's full state: eligibility, prompt history, trigger progress, session count, and event counts. It also includes a **Reset** button that clears all persisted data — useful for testing first-run flows.
+
+```swift
+// In your debug/dev settings screen:
+NavigationLink("Review Prompt Status") {
+    ReviewKitDebugView()
+}
+
+// Or with a custom instance:
+ReviewKitDebugView(kit: myKit)
+```
+
+### status()
+
+Returns a `ReviewKitStatus` snapshot — a `Sendable` struct containing all the same fields shown by `ReviewKitDebugView`. Use this to build your own debug UI or to log ReviewKit's state:
+
+```swift
+let status = await ReviewKit.shared.status()
+print("Prompts this year: \(status.promptsThisYear) / \(status.maximumPromptsPerYear)")
+print("Next eligible: \(String(describing: status.nextEligibleDate))")
+```
+
+### resetStore()
+
+Clears all persisted ReviewKit data (prompt dates, event counts, session count). Intended for debug/dev settings screens only:
+
+```swift
+await ReviewKit.shared.resetStore()
+```
+
+---
+
 ## Testing
 
-Use `MockReviewStore` (provided in the test target) or your own in-memory implementation to write deterministic tests without touching `UserDefaults`:
+Use your own in-memory `ReviewStoreProtocol` implementation to write deterministic tests without touching `UserDefaults`:
 
 ```swift
 import ReviewKit
@@ -282,7 +318,9 @@ ReviewKit (actor)
 │   ├── EventCountTrigger
 │   ├── SessionCountTrigger
 │   └── CompositeTrigger
-└── SwiftUI+ReviewKit      — .reviewKitEnabled(), .onReviewEvent(), \.reviewKit
+├── ReviewKitStatus        — Sendable state snapshot (via status())
+├── SwiftUI+ReviewKit      — .reviewKitEnabled(), .onReviewEvent(), \.reviewKit
+└── ReviewKitDebugView     — debug UI (DEBUG builds only)
 ```
 
 All mutable state is confined to the `ReviewKit` actor. Public types are `Sendable`. The `UserDefaultsReviewStore` struct uses an `NSLock` for its `@unchecked Sendable` conformance since `UserDefaults` is not natively `Sendable`.
