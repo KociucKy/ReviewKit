@@ -47,7 +47,7 @@ public struct ReviewConfiguration: Sendable {
 /// This type is internal; consumers interact with it via ``ReviewKit``.
 struct ReviewPolicy: Sendable {
 
-    let configuration: ReviewConfiguration
+    public let configuration: ReviewConfiguration
 
     // MARK: Eligibility
 
