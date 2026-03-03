@@ -5,6 +5,116 @@ import StoreKit
 import UIKit
 #endif
 
+// MARK: - TriggerStatus
+
+/// A human-readable snapshot of a single registered trigger's current state.
+public struct TriggerStatus: Sendable {
+    /// A short, human-readable description of the trigger (e.g. `"task_completed ≥ 5"`).
+    public let label: String
+    /// The current value being measured against the threshold (e.g. current event count).
+    public let currentValue: Int?
+    /// The threshold the trigger must reach to fire.
+    public let threshold: Int?
+    /// Whether the trigger has already fired (current value ≥ threshold).
+    public let isFired: Bool
+}
+
+// MARK: - ReviewKitStatus
+
+/// A point-in-time snapshot of ReviewKit's full state, safe to pass across isolation boundaries.
+public struct ReviewKitStatus: Sendable {
+    // MARK: Configuration
+    /// Maximum number of prompts allowed in a rolling 365-day window.
+    public let maximumPromptsPerYear: Int
+    /// Minimum number of days required between successive prompts.
+    public let minimumDaysBetweenPrompts: Int
+
+    // MARK: Prompt history
+    /// All dates on which the review prompt was shown (all-time).
+    public let promptDates: [Date]
+    /// Number of prompts shown in the last 365 days.
+    public let promptsThisYear: Int
+    /// Remaining prompt budget for the current 365-day window.
+    public let promptsRemainingThisYear: Int
+    /// The most recent prompt date, if any.
+    public let lastPromptDate: Date?
+    /// The earliest date a next prompt is policy-allowed based on the minimum gap.
+    /// `nil` if no prompt has been shown yet.
+    public let nextEligibleDate: Date?
+
+    // MARK: Usage
+    /// Total number of app sessions recorded.
+    public let sessionCount: Int
+    /// All tracked event names and their cumulative counts.
+    public let eventCounts: [String: Int]
+
+    // MARK: Eligibility
+    /// Whether the policy currently allows a review prompt to be shown.
+    public let isCurrentlyEligible: Bool
+
+    // MARK: Triggers
+    /// Status of each registered trigger.
+    public let triggerStatuses: [TriggerStatus]
+
+    // MARK: Internal init
+
+    init(store: any ReviewStoreProtocol, policy: ReviewPolicy, triggers: [any ReviewTrigger]) {
+        let now = Date()
+        let config = policy.configuration
+
+        self.maximumPromptsPerYear = config.maximumPromptsPerYear
+        self.minimumDaysBetweenPrompts = config.minimumDaysBetweenPrompts
+        self.promptDates = store.promptDates
+        self.sessionCount = store.sessionCount
+        self.eventCounts = store.eventCounts
+        self.isCurrentlyEligible = policy.isEligible(store: store, now: now)
+        self.lastPromptDate = store.promptDates.max()
+
+        let oneYearAgo = Calendar.current.date(byAdding: .day, value: -365, to: now) ?? now
+        let thisYear = store.promptDates.filter { $0 > oneYearAgo }.count
+        self.promptsThisYear = thisYear
+        self.promptsRemainingThisYear = max(config.maximumPromptsPerYear - thisYear, 0)
+
+        if let last = store.promptDates.max(), config.minimumDaysBetweenPrompts > 0 {
+            self.nextEligibleDate = Calendar.current.date(
+                byAdding: .day, value: config.minimumDaysBetweenPrompts, to: last
+            )
+        } else {
+            self.nextEligibleDate = nil
+        }
+
+        self.triggerStatuses = triggers.map { trigger in
+            TriggerStatus(trigger: trigger, store: store)
+        }
+    }
+}
+
+private extension TriggerStatus {
+    init(trigger: any ReviewTrigger, store: any ReviewStoreProtocol) {
+        if let t = trigger as? EventCountTrigger {
+            let count = store.eventCounts[t.eventName] ?? 0
+            self.init(
+                label: "\(t.eventName) ≥ \(t.threshold)",
+                currentValue: count,
+                threshold: t.threshold,
+                isFired: count >= t.threshold
+            )
+        } else if let t = trigger as? SessionCountTrigger {
+            self.init(
+                label: "Sessions ≥ \(t.threshold)",
+                currentValue: store.sessionCount,
+                threshold: t.threshold,
+                isFired: store.sessionCount >= t.threshold
+            )
+        } else if let t = trigger as? CompositeTrigger {
+            let fired = t.shouldRequestReview(after: nil, store: store)
+            self.init(label: "CompositeTrigger", currentValue: nil, threshold: nil, isFired: fired)
+        } else {
+            self.init(label: String(describing: type(of: trigger)), currentValue: nil, threshold: nil, isFired: false)
+        }
+    }
+}
+
 // MARK: - ReviewKit
 
 /// The central coordinator for App Store review prompts.
@@ -114,6 +224,25 @@ public actor ReviewKit {
     /// want the policy guard (yearly cap + day gap) to be the final check.
     public func requestReviewIfAppropriate() async {
         await evaluateAndRequestIfNeeded(event: nil, skipTriggers: true)
+    }
+
+    // MARK: Debug / status
+
+    /// Returns a snapshot of the current ReviewKit state for display in a debug UI.
+    ///
+    /// All fields are safe to read from any isolation context once the `async` call returns.
+    public func status() -> ReviewKitStatus {
+        ReviewKitStatus(store: store, policy: policy, triggers: triggers)
+    }
+
+    /// Resets all persisted review data (prompt dates, event counts, session count).
+    ///
+    /// Intended for use in debug/dev settings screens only. Calling this in production will
+    /// cause ReviewKit to behave as if the app was freshly installed.
+    public func resetStore() {
+        store.promptDates = []
+        store.eventCounts = [:]
+        store.sessionCount = 0
     }
 
     // MARK: Internal helpers (accessible from tests via @testable)
