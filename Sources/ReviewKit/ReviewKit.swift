@@ -38,9 +38,10 @@ public struct ReviewKitStatus: Sendable {
     public let promptsRemainingThisYear: Int
     /// The most recent prompt date, if any.
     public let lastPromptDate: Date?
-    /// The earliest date a next prompt is policy-allowed based on the minimum gap.
-    /// `nil` if no prompt has been shown yet.
-    public let nextEligibleDate: Date?
+        /// The earliest date a next prompt is policy-allowed based on the minimum gap.
+        /// `nil` if no prompt has been shown yet. Equal to the last prompt date when
+        /// `minimumDaysBetweenPrompts` is `0`.
+        public let nextEligibleDate: Date?
 
     // MARK: Usage
     /// Total number of app sessions recorded.
@@ -75,10 +76,10 @@ public struct ReviewKitStatus: Sendable {
         self.promptsThisYear = thisYear
         self.promptsRemainingThisYear = max(config.maximumPromptsPerYear - thisYear, 0)
 
-        if let last = store.promptDates.max(), config.minimumDaysBetweenPrompts > 0 {
-            self.nextEligibleDate = Calendar.current.date(
-                byAdding: .day, value: config.minimumDaysBetweenPrompts, to: last
-            )
+        if let last = store.promptDates.max() {
+            self.nextEligibleDate = config.minimumDaysBetweenPrompts > 0
+                ? Calendar.current.date(byAdding: .day, value: config.minimumDaysBetweenPrompts, to: last)
+                : last
         } else {
             self.nextEligibleDate = nil
         }
@@ -107,7 +108,7 @@ private extension TriggerStatus {
                 isFired: store.sessionCount >= t.threshold
             )
         } else if let t = trigger as? CompositeTrigger {
-            let fired = t.shouldRequestReview(after: nil, store: store)
+            let fired = t.isSatisfied(store: store)
             self.init(label: "CompositeTrigger", currentValue: nil, threshold: nil, isFired: fired)
         } else {
             self.init(label: String(describing: type(of: trigger)), currentValue: nil, threshold: nil, isFired: false)

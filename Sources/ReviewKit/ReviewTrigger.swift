@@ -33,6 +33,23 @@ public protocol ReviewTrigger: Sendable {
     ///     from a manual call rather than a specific event.
     ///   - store: The current persistence state.
     func shouldRequestReview(after event: ReviewEvent?, store: any ReviewStoreProtocol) -> Bool
+
+    /// Returns `true` if the trigger's threshold condition is currently met, independent
+    /// of which event (if any) was most recently signalled.
+    ///
+    /// This is used for status/debug display where you want to know whether the stored
+    /// counts satisfy the trigger, without needing a live event to route against.
+    ///
+    /// The default implementation passes `nil` as the event, which works for triggers that
+    /// don't key on event name. Override this for event-name-gated triggers like
+    /// ``EventCountTrigger``.
+    func isSatisfied(store: any ReviewStoreProtocol) -> Bool
+}
+
+public extension ReviewTrigger {
+    func isSatisfied(store: any ReviewStoreProtocol) -> Bool {
+        shouldRequestReview(after: nil, store: store)
+    }
 }
 
 // MARK: - EventCountTrigger
@@ -57,6 +74,11 @@ public struct EventCountTrigger: ReviewTrigger {
 
     public func shouldRequestReview(after event: ReviewEvent?, store: any ReviewStoreProtocol) -> Bool {
         guard event?.name == eventName else { return false }
+        let count = store.eventCounts[eventName] ?? 0
+        return count >= threshold
+    }
+
+    public func isSatisfied(store: any ReviewStoreProtocol) -> Bool {
         let count = store.eventCounts[eventName] ?? 0
         return count >= threshold
     }
@@ -109,5 +131,9 @@ public struct CompositeTrigger: ReviewTrigger {
 
     public func shouldRequestReview(after event: ReviewEvent?, store: any ReviewStoreProtocol) -> Bool {
         return triggers.contains { $0.shouldRequestReview(after: event, store: store) }
+    }
+
+    public func isSatisfied(store: any ReviewStoreProtocol) -> Bool {
+        return triggers.contains { $0.isSatisfied(store: store) }
     }
 }
